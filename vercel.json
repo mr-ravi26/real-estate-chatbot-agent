@@ -3,9 +3,5 @@
   "devCommand": "npm run dev",
   "installCommand": "npm install",
   "framework": "nextjs",
-  "outputDirectory": ".next",
-  "env": {
-    "MONGODB_URI": "@mongodb_uri",
-    "OPENAI_API_KEY": "@openai_api_key"
-  }
+  "outputDirectory": ".next"
 }
