@@ -1,6 +1,5 @@
 # Agent Mira - AI Real Estate Chatbot 🏡
 
-
 ![Next.js](https://img.shields.io/badge/Next.js-14-black)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue)
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind-3.4-38bdf8)
