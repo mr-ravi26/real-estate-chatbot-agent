@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAllProperties, parseUserPreferences, filterProperties, rankProperties } from '@/lib/propertyUtils';
+import { getAllProperties, filterPropertiesNLP, rankPropertiesNLP } from '@/lib/propertyUtils';
+import { extractPropertyPreferences, generateNaturalResponse } from '@/lib/nlp';
 
 export async function POST(request: NextRequest) {
   try {
@@ -12,38 +13,40 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    // Parse user preferences from the message
-    const preferences = parseUserPreferences(message);
+    // Use OpenAI to extract preferences from natural language
+    const preferences = await extractPropertyPreferences(message);
+    
+    // Handle greetings and non-search intents
+    if (preferences.intent === 'greeting') {
+      const greetingResponse = await generateNaturalResponse(
+        message,
+        preferences,
+        0
+      ).catch(() => 
+        "👋 Hi! I'm Agent Mira, your AI real estate assistant. Tell me what you're looking for - budget, location, bedrooms, or amenities!"
+      );
+      return NextResponse.json({
+        message: greetingResponse,
+        properties: [],
+        preferences,
+      });
+    }
     
     // Get all properties
     const allProperties = getAllProperties();
     
-    // Filter based on preferences
-    let matchedProperties = filterProperties(allProperties, preferences);
+    // Filter based on NLP-extracted preferences
+    let matchedProperties = filterPropertiesNLP(allProperties, preferences);
     
-    // Rank properties
-    matchedProperties = rankProperties(matchedProperties);
+    // Rank properties based on preferences and user intent
+    matchedProperties = rankPropertiesNLP(matchedProperties, preferences);
     
-    // Generate response message
-    let responseMessage = '';
-    
-    if (matchedProperties.length === 0) {
-      responseMessage = "I couldn't find any properties matching your criteria. Try adjusting your budget, location, or other preferences.";
-    } else {
-      const preferencesText = [];
-      if (preferences.bedrooms) preferencesText.push(`${preferences.bedrooms} bedroom${preferences.bedrooms > 1 ? 's' : ''}`);
-      if (preferences.budget) preferencesText.push(`under $${(preferences.budget / 1000).toFixed(0)}K`);
-      if (preferences.location) preferencesText.push(`in ${preferences.location}`);
-      if (preferences.amenities && preferences.amenities.length > 0) {
-        preferencesText.push(`with ${preferences.amenities.join(', ')}`);
-      }
-      
-      const criteriaText = preferencesText.length > 0 
-        ? preferencesText.join(' ')
-        : 'your criteria';
-      
-      responseMessage = `I found ${matchedProperties.length} propert${matchedProperties.length === 1 ? 'y' : 'ies'} matching ${criteriaText}. Check them out below!`;
-    }
+    // Generate natural response using OpenAI
+    const responseMessage = await generateNaturalResponse(
+      message,
+      preferences,
+      matchedProperties.length
+    );
     
     return NextResponse.json({
       message: responseMessage,
