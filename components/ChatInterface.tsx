@@ -117,6 +117,7 @@ export default function ChatInterface() {
         role: 'assistant',
         content: data.message,
         properties: data.properties,
+        suggestions: data.suggestions,
         timestamp: new Date(),
       };
 
@@ -177,6 +178,7 @@ export default function ChatInterface() {
           role: 'assistant',
           content: data.message,
           properties: data.properties,
+          suggestions: data.suggestions,
           timestamp: new Date(),
         };
         setMessages(prev => [...prev, assistantMessage]);
@@ -273,6 +275,23 @@ export default function ChatInterface() {
                             })}
                           </div>
                         </div>
+                        
+                        {message.suggestions && message.suggestions.length > 0 && (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {message.suggestions.map((suggestion, idx) => (
+                              <Button
+                                key={idx}
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleQuickPrompt(suggestion)}
+                                className="text-xs bg-background/50 hover:bg-background border-primary/20 hover:border-primary/40 transition-all"
+                              >
+                                <Sparkles className="h-3 w-3 mr-1" />
+                                {suggestion}
+                              </Button>
+                            ))}
+                          </div>
+                        )}
                         
                         {message.properties && message.properties.length > 0 && (
                           <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

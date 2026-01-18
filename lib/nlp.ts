@@ -199,7 +199,7 @@ async function generateWithOpenAI(
         },
       ],
       temperature: 0.7,
-      max_tokens: 150,
+      max_tokens: 500,
     });
 
     return completion.choices[0]?.message?.content || generateFallbackResponse(preferences, matchCount);
@@ -233,7 +233,7 @@ Generate a response:`;
       contents: prompt,
       config: {
         temperature: 0.7,
-        maxOutputTokens: 150,
+        maxOutputTokens: 300,
       },
     });
 
@@ -273,7 +273,9 @@ Budget conversion rules:
 
 For ranges like "between X and Y" or "X to Y", use minBudget/maxBudget or minBedrooms/maxBedrooms.
 For "under", "below", "less than", "up to" use only budget or maxBudget.
-For "above", "over", "more than" use minBudget.`;
+For "above", "over", "more than" use minBudget.
+
+IMPORTANT: If the message is just a greeting (hi, hello, hey, etc.) or incomplete text without property details, set intent to "greeting" and leave all other fields null.`;
 }
 
 /**
@@ -363,7 +365,10 @@ function parseUserPreferencesRegexFallback(input: string): ExtractedPreferences 
   }
   
   // Detect intent
-  if (/^(hi|hello|hey|greetings)/i.test(input.trim())) {
+  if (/^(hi|hello|hey|greetings|good morning|good afternoon|good evening|howdy|sup)/i.test(input.trim())) {
+    preferences.intent = 'greeting';
+  } else if (input.trim().length < 10 && !/\d/.test(input) && !/bhk|bed|room|location|property/i.test(input)) {
+    // Short messages without numbers or property keywords are likely greetings
     preferences.intent = 'greeting';
   } else {
     preferences.intent = 'search';

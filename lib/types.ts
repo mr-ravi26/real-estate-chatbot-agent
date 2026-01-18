@@ -35,6 +35,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   properties?: Property[];
+  suggestions?: string[];
   timestamp: Date;
 }
 
