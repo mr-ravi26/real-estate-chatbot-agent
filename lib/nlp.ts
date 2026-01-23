@@ -41,38 +41,45 @@ if (AI_PROVIDER === 'openai' && !openai) {
  * Extracts structured property preferences from natural language using configured AI provider
  */
 export async function extractPropertyPreferences(
-  userMessage: string
+  userMessage: string,
+  conversationHistory: Array<{role: string; content: string}> = []
 ): Promise<ExtractedPreferences> {
   // Route to appropriate provider
   switch (AI_PROVIDER) {
     case 'openai':
-      return extractWithOpenAI(userMessage);
+      return extractWithOpenAI(userMessage, conversationHistory);
     case 'gemini':
-      return extractWithGemini(userMessage);
+      return extractWithGemini(userMessage, conversationHistory);
     case 'regex':
     default:
       console.log(`ℹ️  Using ${AI_PROVIDER} provider for parsing`);
-      return parseUserPreferencesRegexFallback(userMessage);
+      return parseUserPreferencesRegexFallback(userMessage, conversationHistory.length > 1);
   }
 }
 
 /**
  * Uses OpenAI to extract preferences
  */
-async function extractWithOpenAI(userMessage: string): Promise<ExtractedPreferences> {
+async function extractWithOpenAI(userMessage: string, conversationHistory: Array<{role: string; content: string}> = []): Promise<ExtractedPreferences> {
   if (!openai) {
     console.log('⚠️  No OpenAI API key found, falling back to regex parsing');
-    return parseUserPreferencesRegexFallback(userMessage);
+    return parseUserPreferencesRegexFallback(userMessage, conversationHistory.length > 1);
   }
 
   try {
+    const hasHistory = conversationHistory.length > 1;
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
+      timeout: 8000,
       messages: [
         {
           role: 'system',
-          content: getSystemPrompt(),
+          content: getSystemPrompt(hasHistory),
         },
+        ...conversationHistory.slice(-6).map(msg => ({
+          role: msg.role as 'user' | 'assistant',
+          content: msg.content
+        })),
         {
           role: 'user',
           content: userMessage,
@@ -102,18 +109,28 @@ async function extractWithOpenAI(userMessage: string): Promise<ExtractedPreferen
 /**
  * Uses Google Gemini to extract preferences
  */
-async function extractWithGemini(userMessage: string): Promise<ExtractedPreferences> {
+async function extractWithGemini(userMessage: string, conversationHistory: Array<{role: string; content: string}> = []): Promise<ExtractedPreferences> {
   if (!genAI) {
     console.log('⚠️  No Gemini API key found, falling back to regex parsing');
-    return parseUserPreferencesRegexFallback(userMessage);
+    return parseUserPreferencesRegexFallback(userMessage, conversationHistory.length > 1);
   }
 
   try {
-    const prompt = `${getSystemPrompt()}
-
+    const hasHistory = conversationHistory.length > 1;
+    
+    // Build conversation context for Gemini
+    let conversationContext = '';
+    if (hasHistory) {
+      conversationContext = '\n\nConversation history:\n' + 
+        conversationHistory.slice(-6).map(msg => 
+          `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`
+        ).join('\n') + '\n\n';
+    }
+    
+    const prompt = `${getSystemPrompt(hasHistory)}${conversationContext}
 User message: ${userMessage}
 
-Return ONLY valid JSON, no other text.`;
+CRITICAL: Return ONLY valid JSON with no other text, commentary, or explanations. Do not include thinking process or notes.`;
 
     const response = await genAI.models.generateContent({
       model: 'gemini-3-flash-preview',
@@ -123,7 +140,7 @@ Return ONLY valid JSON, no other text.`;
       },
     });
 
-    const text = response.text;
+    let text = response.text;
     
     if (!text) {
       return { intent: 'search' };
@@ -132,9 +149,18 @@ Return ONLY valid JSON, no other text.`;
     // Parse JSON response - extract JSON from markdown or plain text
     let jsonText = text.trim();
     
+    // Remove any meta-commentary before JSON
+    jsonText = jsonText.replace(/^.*?(?=\{)/s, '');
+    
     // Remove markdown code blocks if present
     if (jsonText.startsWith('```')) {
       jsonText = jsonText.replace(/```json?\n?/g, '').replace(/```\n?$/g, '').trim();
+    }
+    
+    // Remove any text after closing brace
+    const lastBrace = jsonText.lastIndexOf('}');
+    if (lastBrace !== -1) {
+      jsonText = jsonText.substring(0, lastBrace + 1);
     }
     
     const extracted = JSON.parse(jsonText) as ExtractedPreferences;
@@ -159,14 +185,14 @@ export async function generateNaturalResponse(
   userMessage: string,
   preferences: ExtractedPreferences,
   matchCount: number,
-  conversationContext?: string
+  conversationHistory: Array<{role: string; content: string}> = []
 ): Promise<string> {
   // Route to appropriate provider
   switch (AI_PROVIDER) {
     case 'openai':
-      return generateWithOpenAI(userMessage, preferences, matchCount);
+      return generateWithOpenAI(userMessage, preferences, matchCount, conversationHistory);
     case 'gemini':
-      return generateWithGemini(userMessage, preferences, matchCount);
+      return generateWithGemini(userMessage, preferences, matchCount, conversationHistory);
     case 'regex':
     default:
       return generateFallbackResponse(preferences, matchCount);
@@ -179,20 +205,27 @@ export async function generateNaturalResponse(
 async function generateWithOpenAI(
   userMessage: string,
   preferences: ExtractedPreferences,
-  matchCount: number
+  matchCount: number,
+  conversationHistory: Array<{role: string; content: string}> = []
 ): Promise<string> {
   if (!openai) {
     return generateFallbackResponse(preferences, matchCount);
   }
 
   try {
+    const hasHistory = conversationHistory.length > 1;
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
+      timeout: 5000,
       messages: [
         {
           role: 'system',
-          content: getResponsePrompt(preferences, matchCount),
+          content: getResponsePrompt(preferences, matchCount, hasHistory),
         },
+        ...conversationHistory.slice(-6).map(msg => ({
+          role: msg.role as 'user' | 'assistant',
+          content: msg.content
+        })),
         {
           role: 'user',
           content: userMessage,
@@ -215,16 +248,33 @@ async function generateWithOpenAI(
 async function generateWithGemini(
   userMessage: string,
   preferences: ExtractedPreferences,
-  matchCount: number
+  matchCount: number,
+  conversationHistory: Array<{role: string; content: string}> = []
 ): Promise<string> {
   if (!genAI) {
     return generateFallbackResponse(preferences, matchCount);
   }
 
   try {
-    const prompt = `${getResponsePrompt(preferences, matchCount)}
-
+    const hasHistory = conversationHistory.length > 1;
+    
+    // Build conversation context for Gemini
+    let conversationContext = '';
+    if (hasHistory) {
+      conversationContext = '\n\nConversation history:\n' + 
+        conversationHistory.slice(-6).map(msg => 
+          `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`
+        ).join('\n') + '\n\n';
+    }
+    
+    const prompt = `${getResponsePrompt(preferences, matchCount, hasHistory)}${conversationContext}
 User message: ${userMessage}
+
+IMPORTANT: Output ONLY the final response to the user. Do NOT include:
+- Your reasoning or thinking process
+- Meta-commentary about the response
+- Notes about refinement or persona
+- Just output the direct, natural response to the user.
 
 Generate a response:`;
 
@@ -233,11 +283,27 @@ Generate a response:`;
       contents: prompt,
       config: {
         temperature: 0.7,
-        maxOutputTokens: 300,
+        maxOutputTokens: 500,
       },
     });
 
-    const text = response.text;
+    let text = response.text;
+    
+    if (!text) {
+      return generateFallbackResponse(preferences, matchCount);
+    }
+    
+    // Clean up Gemini's meta-commentary and thinking process
+    text = text
+      // Remove lines starting with meta-commentary markers
+      .replace(/^(Refining|Thinking|Note|Meta|Internal|Reasoning|Analysis|Commentary|Persona|Character).*$/gmi, '')
+      // Remove content in parentheses that looks like meta-commentary
+      .replace(/\((?:refining|thinking|note|internal|reasoning).*?\)/gi, '')
+      // Remove asterisk-prefixed meta notes
+      .replace(/^\*\s*(Refining|Thinking|Note|Meta).*$/gmi, '')
+      // Remove multiple newlines
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
     
     return text || generateFallbackResponse(preferences, matchCount);
   } catch (error) {
@@ -249,8 +315,10 @@ Generate a response:`;
 /**
  * System prompt for preference extraction (shared across providers)
  */
-function getSystemPrompt(): string {
+function getSystemPrompt(hasHistory: boolean = false): string {
   return `You are an expert at understanding real estate queries. Extract property search preferences from user messages.
+
+${hasHistory ? 'IMPORTANT: This is part of an ongoing conversation. Do NOT set intent to "greeting" unless the user is explicitly saying hello/hi for the first time. If they are asking about properties or continuing the conversation, set intent to "search".' : ''}
 
 Extract the following information in JSON format:
 - location: city, neighborhood, or area mentioned (string)
@@ -281,7 +349,7 @@ IMPORTANT: If the message is just a greeting (hi, hello, hey, etc.) or incomplet
 /**
  * Response generation prompt (shared across providers)
  */
-function getResponsePrompt(preferences: ExtractedPreferences, matchCount: number): string {
+function getResponsePrompt(preferences: ExtractedPreferences, matchCount: number, hasHistory: boolean = false): string {
   return `You are Agent Mira, a friendly and professional AI real estate assistant. Generate natural, conversational responses based on property search results.
 
 Guidelines:
@@ -290,7 +358,12 @@ Guidelines:
 - Mention specific search criteria when relevant
 - If no matches found, suggest adjusting criteria
 - Use emojis sparingly (1-2 per message maximum)
-- For greetings, introduce yourself warmly
+${hasHistory ? 
+`- CRITICAL: This is an ONGOING conversation - NEVER EVER say "Hi I'm Mira" or "Hi! I'm" or introduce yourself
+- Continue naturally from the previous context
+- Reference what the user said previously if relevant
+- Act like you already know the user from previous messages` : 
+`- For first-time greetings, introduce yourself warmly`}
 - Sound human and conversational, not robotic
 
 Preference details provided:
@@ -302,7 +375,7 @@ Number of matching properties: ${matchCount}`;
 /**
  * Fallback regex-based preference parser
  */
-function parseUserPreferencesRegexFallback(input: string): ExtractedPreferences {
+function parseUserPreferencesRegexFallback(input: string, hasHistory: boolean = false): ExtractedPreferences {
   const preferences: ExtractedPreferences = {};
   const lowerInput = input.toLowerCase();
   

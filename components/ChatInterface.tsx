@@ -107,7 +107,13 @@ export default function ChatInterface() {
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: input }),
+        body: JSON.stringify({ 
+          message: input,
+          conversationHistory: messages.map(m => ({
+            role: m.role,
+            content: m.content
+          }))
+        }),
       });
 
       const data = await response.json();
@@ -169,7 +175,13 @@ export default function ChatInterface() {
     fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: prompt }),
+      body: JSON.stringify({ 
+        message: prompt,
+        conversationHistory: messages.map(m => ({
+          role: m.role,
+          content: m.content
+        }))
+      }),
     })
       .then(response => response.json())
       .then(data => {

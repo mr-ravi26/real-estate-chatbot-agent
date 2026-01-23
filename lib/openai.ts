@@ -24,15 +24,20 @@ export interface ExtractedPreferences {
  * Uses OpenAI to extract structured property preferences from natural language
  */
 export async function extractPropertyPreferences(
-  userMessage: string
+  userMessage: string,
+  conversationHistory: Array<{role: string; content: string}> = []
 ): Promise<ExtractedPreferences> {
   try {
+    const hasConversationHistory = conversationHistory.length > 1;
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
+      timeout: 8000,
       messages: [
         {
           role: 'system',
           content: `You are an expert at understanding real estate queries. Extract property search preferences from user messages.
+
+${hasConversationHistory ? 'IMPORTANT: This is part of an ongoing conversation. Do NOT set intent to "greeting" unless the user is explicitly saying hello/hi for the first time. If they are asking about properties or continuing the conversation, set intent to "search".' : ''}
 
 Extract the following information in JSON format:
 - location: city, neighborhood, or area mentioned (string)
@@ -59,6 +64,10 @@ For "above", "over", "more than" use minBudget.
 
 Return ONLY valid JSON, no other text.`,
         },
+        ...conversationHistory.slice(-6).map(msg => ({
+          role: msg.role as 'user' | 'assistant',
+          content: msg.content
+        })),
         {
           role: 'user',
           content: userMessage,
@@ -171,11 +180,13 @@ export async function generateNaturalResponse(
   userMessage: string,
   preferences: ExtractedPreferences,
   matchCount: number,
-  conversationContext?: string
+  conversationHistory: Array<{role: string; content: string}> = []
 ): Promise<string> {
   try {
+    const hasHistory = conversationHistory.length > 1;
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
+      timeout: 5000,
       messages: [
         {
           role: 'system',
@@ -187,7 +198,12 @@ Guidelines:
 - Mention specific search criteria when relevant
 - If no matches found, suggest adjusting criteria
 - Use emojis sparingly (1-2 per message maximum)
-- For greetings, introduce yourself warmly
+${hasHistory ? 
+`- CRITICAL: This is an ONGOING conversation - NEVER EVER say "Hi I'm Mira" or "Hi! I'm" or introduce yourself
+- Continue naturally from the previous context
+- Reference what the user said previously if relevant
+- Act like you already know the user from previous messages` : 
+`- For first-time greetings, introduce yourself warmly`}
 - Sound human and conversational, not robotic
 
 Preference details provided:
@@ -195,6 +211,10 @@ ${JSON.stringify(preferences, null, 2)}
 
 Number of matching properties: ${matchCount}`,
         },
+        ...conversationHistory.slice(-6).map(msg => ({
+          role: msg.role as 'user' | 'assistant',
+          content: msg.content
+        })),
         {
           role: 'user',
           content: userMessage,
@@ -240,6 +260,7 @@ export async function generatePropertyRankingInsights(
   try {
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
+      timeout: 5000,
       messages: [
         {
           role: 'system',

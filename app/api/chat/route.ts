@@ -2,9 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAllProperties, filterPropertiesNLP, rankPropertiesNLP } from '@/lib/propertyUtils';
 import { extractPropertyPreferences, generateNaturalResponse } from '@/lib/nlp';
 
+// Configure maximum duration for this route (60 seconds for Pro plan, 10 for Hobby)
+export const maxDuration = 60;
+
 export async function POST(request: NextRequest) {
   try {
-    const { message } = await request.json();
+    const { message, conversationHistory = [] } = await request.json();
     
     if (!message || typeof message !== 'string') {
       return NextResponse.json(
@@ -13,18 +16,35 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    // Use OpenAI to extract preferences from natural language
-    const preferences = await extractPropertyPreferences(message);
+    // Check if this is the first user message (only initial greeting in history)
+    const isFirstMessage = conversationHistory.filter((m: any) => m.role === 'user').length === 0;
     
-    // Handle greetings and non-search intents
-    if (preferences.intent === 'greeting') {
-      const greetingResponse = await generateNaturalResponse(
-        message,
-        preferences,
-        0
-      ).catch(() => 
+    // Use OpenAI to extract preferences from natural language with timeout
+    const preferences = await Promise.race([
+      extractPropertyPreferences(message, conversationHistory),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Preference extraction timeout')), 8000)
+      )
+    ]).catch((error) => {
+      console.error('Preference extraction error:', error);
+      return { intent: 'search' };
+    }) as any;
+    
+    // Force search intent if we have conversation history (prevent greeting loops)
+    if (!isFirstMessage && preferences.intent === 'greeting') {
+      preferences.intent = 'search';
+    }
+    
+    // Handle greetings only on first message
+    if (preferences.intent === 'greeting' && isFirstMessage) {
+      const greetingResponse = await Promise.race([
+        generateNaturalResponse(message, preferences, 0),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Response generation timeout')), 5000)
+        )
+      ]).catch(() => 
         "👋 Hi! I'm Agent Mira, your AI real estate assistant. Tell me what you're looking for - budget, location, bedrooms, or amenities!"
-      );
+      ) as string;
       
       // Add suggestion chips for greeting responses
       const suggestions = [
@@ -51,12 +71,39 @@ export async function POST(request: NextRequest) {
     // Rank properties based on preferences and user intent
     matchedProperties = rankPropertiesNLP(matchedProperties, preferences);
     
-    // Generate natural response using OpenAI
-    const responseMessage = await generateNaturalResponse(
-      message,
-      preferences,
-      matchedProperties.length
-    );
+    // Generate natural response using OpenAI with timeout and conversation context
+    let responseMessage = await Promise.race([
+      generateNaturalResponse(message, preferences, matchedProperties.length, conversationHistory),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Response generation timeout')), 5000)
+      )
+    ]).catch(() => {
+      // Fallback response
+      const count = matchedProperties.length;
+      if (count === 0) return "I couldn't find any properties matching your criteria. Try adjusting your search!";
+      return `I found ${count} propert${count === 1 ? 'y' : 'ies'} for you. Check them out below!`;
+    }) as string;
+    
+    // Post-process: Remove greeting phrases in ongoing conversations
+    if (!isFirstMessage) {
+      // Remove common greeting patterns
+      responseMessage = responseMessage
+        .replace(/^Hi!?\s*I'?m\s+(Agent\s+)?Mira[,.]?\s*/i, '')
+        .replace(/^Hello!?\s*I'?m\s+(Agent\s+)?Mira[,.]?\s*/i, '')
+        .replace(/^Hey!?\s*I'?m\s+(Agent\s+)?Mira[,.]?\s*/i, '')
+        .replace(/^👋\s*Hi!?\s*I'?m\s+(Agent\s+)?Mira[,.]?\s*/i, '')
+        .replace(/I'?m\s+Mira,?\s+your\s+(friendly\s+)?real\s+estate\s+assistant\.?/i, '')
+        .replace(/I'?m\s+(Agent\s+)?Mira,?\s+and\s+I'?m\s+/i, 'I\'m ')
+        .trim();
+      
+      // If response was entirely a greeting, use fallback
+      if (!responseMessage || responseMessage.length < 10) {
+        const count = matchedProperties.length;
+        responseMessage = count === 0 
+          ? "I couldn't find any properties matching your criteria. Try adjusting your search!"
+          : `I found ${count} propert${count === 1 ? 'y' : 'ies'} for you. Check them out below!`;
+      }
+    }
     
     // Generate contextual suggestions based on search results
     const suggestions: string[] = [];
