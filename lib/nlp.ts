@@ -170,11 +170,15 @@ CRITICAL: Return ONLY valid JSON with no other text, commentary, or explanations
       extracted.amenities = extracted.amenities.map(a => a.toLowerCase());
     }
     
+    // Log extracted preferences for debugging
+    console.log('✅ Gemini extracted preferences:', JSON.stringify(extracted, null, 2));
+    
     return extracted;
   } catch (error) {
-    console.error('Error extracting preferences with Gemini:', error);
+    console.error('❌ Error extracting preferences with Gemini:', error);
+    console.log('Raw response text:', text);
     console.log('⚠️  Falling back to regex-based parsing');
-    return parseUserPreferencesRegexFallback(userMessage);
+    return parseUserPreferencesRegexFallback(userMessage, conversationHistory.length > 1);
   }
 }
 
@@ -379,6 +383,8 @@ function parseUserPreferencesRegexFallback(input: string, hasHistory: boolean = 
   const preferences: ExtractedPreferences = {};
   const lowerInput = input.toLowerCase();
   
+  console.log('🔄 Using regex fallback for:', input);
+  
   // Extract budget
   const budgetMatch = lowerInput.match(/(?:under|below|less than|up to|max)\s*\$?\s*(\d+(?:,?\d+)*)\s*(?:k|lakhs?|thousand|million|m)?/i);
   if (budgetMatch) {
@@ -391,6 +397,7 @@ function parseUserPreferencesRegexFallback(input: string, hasHistory: boolean = 
       amount *= 1000000;
     }
     preferences.budget = amount;
+    console.log('💰 Extracted budget:', amount);
   }
   
   // Extract budget range
@@ -404,22 +411,33 @@ function parseUserPreferencesRegexFallback(input: string, hasHistory: boolean = 
     }
     preferences.minBudget = min;
     preferences.maxBudget = max;
+    console.log('💰 Extracted budget range:', min, '-', max);
   }
   
   // Extract bedrooms
   const bedroomMatch = lowerInput.match(/(\d+)\s*(?:bhk|bed|bedroom)/i);
   if (bedroomMatch) {
     preferences.bedrooms = parseInt(bedroomMatch[1]);
+    console.log('🛏️ Extracted bedrooms:', preferences.bedrooms);
   }
   
-  // Extract location
-  const locationKeywords = ['in', 'at', 'near', 'around'];
-  for (const keyword of locationKeywords) {
-    const regex = new RegExp(`${keyword}\\s+([a-z\\s,]+?)(?:\\s+with|\\s+under|\\s+below|$)`, 'i');
-    const match = lowerInput.match(regex);
-    if (match) {
-      preferences.location = match[1].trim();
-      break;
+  // Extract location - improved patterns
+  const locationPatterns = [
+    /(?:in|at|near|around)\s+([a-z\s,]+?)(?:\s+with|\s+under|\s+below|\s+properties?|$)/i,
+    /properties?\s+(?:in|at|near)\s+([a-z\s,]+?)(?:\s+with|\s+under|\s+below|$)/i,
+    /([a-z\s]+?)\s+(?:properties?|apartments?|house|condo)/i,
+  ];
+  
+  for (const pattern of locationPatterns) {
+    const match = lowerInput.match(pattern);
+    if (match && match[1]) {
+      const location = match[1].trim();
+      // Filter out common non-location words
+      if (location.length > 2 && !['any', 'the', 'for', 'rental', 'rent', 'sale', 'buy'].includes(location)) {
+        preferences.location = location;
+        console.log('📍 Extracted location:', location);
+        break;
+      }
     }
   }
   
@@ -435,17 +453,23 @@ function parseUserPreferencesRegexFallback(input: string, hasHistory: boolean = 
   
   if (foundAmenities.length > 0) {
     preferences.amenities = foundAmenities;
+    console.log('🏠 Extracted amenities:', foundAmenities);
   }
   
   // Detect intent
   if (/^(hi|hello|hey|greetings|good morning|good afternoon|good evening|howdy|sup)/i.test(input.trim())) {
     preferences.intent = 'greeting';
+  } else if (hasHistory && input.trim().length < 15 && !/\d/.test(input) && !/bhk|bed|room|location|property/i.test(input)) {
+    // In ongoing conversation, avoid greeting for short queries
+    preferences.intent = 'search';
   } else if (input.trim().length < 10 && !/\d/.test(input) && !/bhk|bed|room|location|property/i.test(input)) {
     // Short messages without numbers or property keywords are likely greetings
     preferences.intent = 'greeting';
   } else {
     preferences.intent = 'search';
   }
+  
+  console.log('✅ Regex extracted preferences:', JSON.stringify(preferences, null, 2));
   
   return preferences;
 }

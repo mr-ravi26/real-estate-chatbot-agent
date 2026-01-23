@@ -65,8 +65,12 @@ export async function POST(request: NextRequest) {
     // Get all properties
     const allProperties = getAllProperties();
     
+    console.log(`🔍 Searching with preferences:`, JSON.stringify(preferences, null, 2));
+    
     // Filter based on NLP-extracted preferences
     let matchedProperties = filterPropertiesNLP(allProperties, preferences);
+    
+    console.log(`📊 Found ${matchedProperties.length} properties after filtering`);
     
     // Rank properties based on preferences and user intent
     matchedProperties = rankPropertiesNLP(matchedProperties, preferences);
