@@ -35,28 +35,43 @@ export async function POST(request: NextRequest) {
       preferences.intent = 'search';
     }
     
-    // Handle greetings only on first message
-    if (preferences.intent === 'greeting' && isFirstMessage) {
+    // Handle greetings or vague messages
+    const isVagueQuery = !preferences.location && 
+                        !preferences.budget && 
+                        !preferences.minBudget && 
+                        !preferences.maxBudget && 
+                        !preferences.bedrooms && 
+                        !preferences.minBedrooms && 
+                        !preferences.maxBedrooms && 
+                        !preferences.bathrooms && 
+                        !preferences.propertyType && 
+                        (!preferences.amenities || preferences.amenities.length === 0);
+    
+    if (preferences.intent === 'greeting' || isVagueQuery) {
       const greetingResponse = await Promise.race([
-        generateNaturalResponse(message, preferences, 0),
+        generateNaturalResponse(message, preferences, 0, conversationHistory),
         new Promise((_, reject) => 
           setTimeout(() => reject(new Error('Response generation timeout')), 5000)
         )
-      ]).catch(() => 
-        "👋 Hi! I'm Agent Mira, your AI real estate assistant. Tell me what you're looking for - budget, location, bedrooms, or amenities!"
-      ) as string;
+      ]).catch(() => {
+        if (isFirstMessage) {
+          return "👋 Hi! I'm Agent Mira, your AI real estate assistant. Tell me what you're looking for - budget, location, bedrooms, or amenities!";
+        } else {
+          return "It seems like we're not quite on the same page yet! Could you share what you're looking for in terms of location, budget, or any specific features?";
+        }
+      }) as string;
       
-      // Add suggestion chips for greeting responses
+      // Add suggestion chips for greeting/vague responses
       const suggestions = [
         '2 BHK under $500K',
         'Luxury properties with pool',
-        '3 bedroom house',
-        'Show properties in Miami',
+        '3 bedroom house in Miami',
+        'Show properties with parking',
       ];
       
       return NextResponse.json({
         message: greetingResponse,
-        properties: [],
+        properties: [], // Don't show properties for vague queries
         preferences,
         suggestions,
       });

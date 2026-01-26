@@ -70,7 +70,6 @@ async function extractWithOpenAI(userMessage: string, conversationHistory: Array
     const hasHistory = conversationHistory.length > 1;
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
-      timeout: 8000,
       messages: [
         {
           role: 'system',
@@ -220,7 +219,6 @@ async function generateWithOpenAI(
     const hasHistory = conversationHistory.length > 1;
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
-      timeout: 5000,
       messages: [
         {
           role: 'system',
@@ -354,6 +352,36 @@ IMPORTANT: If the message is just a greeting (hi, hello, hey, etc.) or incomplet
  * Response generation prompt (shared across providers)
  */
 function getResponsePrompt(preferences: ExtractedPreferences, matchCount: number, hasHistory: boolean = false): string {
+  // Special handling for vague queries or greetings
+  const isVagueQuery = !preferences.location && 
+                      !preferences.budget && 
+                      !preferences.minBudget && 
+                      !preferences.maxBudget && 
+                      !preferences.bedrooms && 
+                      !preferences.minBedrooms && 
+                      !preferences.maxBedrooms && 
+                      !preferences.bathrooms && 
+                      !preferences.propertyType && 
+                      (!preferences.amenities || preferences.amenities.length === 0);
+
+  if (preferences.intent === 'greeting' || isVagueQuery) {
+    return `You are Agent Mira, a friendly and enthusiastic AI real estate assistant. The user sent a ${preferences.intent === 'greeting' ? 'greeting' : 'vague message'}.
+
+Generate a warm, conversational response that:
+${hasHistory ? 
+`- Acknowledges their message naturally (DON'T introduce yourself again)
+- Gently asks what they're looking for to help them better
+- Mentions examples like "budget, location, bedrooms, or amenities"` :
+`- Greets them warmly and introduces yourself as Agent Mira
+- Asks what they're looking for
+- Mentions examples like "budget, location, bedrooms, or amenities"`}
+- Keep it friendly and brief (2 sentences max)
+- Use 1 emoji maximum
+- Sound natural and conversational
+
+User's message: "${preferences.intent === 'greeting' ? 'greeting' : 'unclear/vague'}"`;
+  }
+
   return `You are Agent Mira, a friendly and professional AI real estate assistant. Generate natural, conversational responses based on property search results.
 
 Guidelines:
